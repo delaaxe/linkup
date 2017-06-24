@@ -1,0 +1,13 @@
+<div class="container">
+	<div class="row">
+		<div class="col-md-12">
+			<h3>Linkup</h3>
+			<div class="list-group" *ngFor="let month of getMonths()">
+				<div class="list-group-item active">{{month}}</div>
+				<div class="list-group-item" *ngFor="let event of events[month]">
+					<span style="font-size: 10px;">{{getDayOfMonth(event)}}</span> <span [innerHTML]="event.sentence"></span>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
