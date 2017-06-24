@@ -8,7 +8,11 @@ let fakeTweets = tweets.map(tweet => ({
 }));
 
 fakeTweets.forEach(tweet => {
-  tweet.grouping = tweet.date.toLocaleString('en-us', { month: 'long' }) + ' ' + tweet.date.getFullYear();
+  tweet.grouping = tweet.date.toLocaleString('en-us', { month: 'long' });
+  let year = tweet.date.getFullYear();
+  if (year < new Date().getFullYear()) {
+    tweet.grouping += ' ' + tweet.date.getFullYear()
+  }
 })
 
 function groupBy<T>(xs: T[], key: string): { string?: object[]; } {
