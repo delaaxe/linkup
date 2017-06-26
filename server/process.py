@@ -86,7 +86,7 @@ def format_tweet(delta):
     return 'Unknown'
 
 
-def main():
+def load_fixture_tables():
     cwd = pathlib.Path(__file__).parent
     xl = pd.ExcelFile(cwd / 'employees.xlsx')
     tables = [(sheet_name, xl.parse(sheet_name, index_col=0)) for sheet_name in xl.sheet_names]
@@ -94,12 +94,22 @@ def main():
         table.set_index(table.index.map(lambda x: '' if pd.isnull(x) else str(int(x))), inplace=True)
         table.index.name = 'id'
         table.manager_id = table.manager_id.map(lambda x: '' if pd.isnull(x) else str(int(x)))
+    return tables
+
+
+def load_tables():
+    raise NotImplementedError()
+
+
+def main():
+    tables = load_fixture_tables()
     deltas = get_deltas_from_tables(tables)
     tweets = list(map(delta_to_tweet, deltas))
-    tweets[:2] = tweets[1], tweets[0]
 
+    cwd = pathlib.Path(__file__).parent
     with (cwd.parent / 'client' / 'src' / 'app' / 'app.fixture.ts').open('w') as fp:
         fp.write(f'export let tweets = {json.dumps(tweets, indent=2)};')
+
 
 if __name__ == '__main__':
     main()
