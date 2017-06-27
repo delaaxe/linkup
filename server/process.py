@@ -1,3 +1,4 @@
+import os
 import io
 import json
 import pathlib
@@ -14,75 +15,78 @@ def create_patch(previous_df, df):
     return csvdiff.patch.create(from_records, to_records, index_columns=['id'])
 
 
-def patch_to_deltas(patch, date, previous_df, df):
-    dfs = {'from': previous_df, 'to': df}
+def patch_to_tweets(patch, date, df):
     for change in patch['added']:
         yield {
-            'df': dfs,
-            'actor': change['id'],
+            'user': change,
             'type': 'arrival',
             'date': date,
-            'data': change
+            'entities': {'hashtags': [], 'user_mentions': []},
+            'deltas': {field_name: {'from': None, 'to': value} for field_name, value in change.items()},
         }
     for change in patch['removed']:
         yield {
-            'df': dfs,
-            'actor': change['id'],
+            'user': change,
             'type': 'departure',
             'date': date,
-            'data': change
+            'entities': {'hashtags': [], 'user_mentions': []},
+            'deltas': {field_name: {'from': value, 'to': None} for field_name, value in change.items()}
         }
     for change in patch['changed']:
-        yield {
-            'df': dfs,
-            'actor': change['key'][0],
+        id = change['key'][0]
+        user = {'id': id, **df.loc[id].to_dict()}
+        tweet = {
+            'user': user,
             'type': 'change',
             'date': date,
-            'data': change['fields']
+            'entities': {'hashtags': [], 'user_mentions': []},
+            'deltas': change['fields']
         }
+        if 'manager_id' in change['fields']:
+            manager_id = change['fields']['manager_id']['to']
+            if manager_id:
+                tweet['user']['manager'] = {'id': id, **df.loc[manager_id].to_dict()}
+        yield tweet
 
 
 def get_deltas_from_tables(tables):
     for (_, previous_df), (date, df) in zip(tables[:-1], tables[1:]):
         patch = create_patch(previous_df, df)
-        yield from patch_to_deltas(patch, date, previous_df, df)
+        for tweet in patch_to_tweets(patch, date, df):
+            tweet['source'] = format_html(tweet)
+            yield tweet
 
 
-def delta_to_tweet(delta):
-    return {
-        'actor': delta['actor'],
-        'date': delta['date'],
-        'source': format_tweet(delta),
-    }
+def format_html(tweet):
+    def format_user(user):
+        return f'<a href="#">@{user["first_name"]} {user["last_name"]}</a>'
 
+    user = tweet['user']
+    user_mentions = tweet['entities']['user_mentions']
+    hashtags = tweet['entities']['hashtags']
 
-def format_tweet(delta):
-    def format_actor(actor):
-        return f'<a href="#">@{actor.first_name} {actor.last_name}</a>'
+    name = format_user(user)
+    user_mentions += [user['id']]
 
-    if delta['type'] == 'arrival':
-        employee = delta['df']['to'].loc[delta['actor']]
-        name = format_actor(employee)
-        return f'<i class="fa fa-star" aria-hidden="true"></i> {name} joined SG as <a href="#">#{employee.job_title}</a>'
-    if delta['type'] == 'departure':
-        employee = delta['df']['from'].loc[delta['actor']]
-        name = format_actor(employee)
+    if tweet['type'] == 'arrival':
+        hashtags += [user["job_title"]]
+        return f'<i class="fa fa-star" aria-hidden="true"></i> {name} joined SG as <a href="#">#{user["job_title"]}</a>'
+    if tweet['type'] == 'departure':
         return f'<i class="fa fa-suitcase" aria-hidden="true"></i> {name} left'
-    if delta['type'] == 'change':
-        employee = delta['df']['to'].loc[delta['actor']]
-        name = format_actor(employee)
-        data = delta['data']
-        if 'city' in data:
-            field = data['city']
-            return f'<i class="fa fa-plane" aria-hidden="true"></i> {name} moved from <a href="#">#{field["to"]}</a> to <a href="#">#{field["from"]}</a>'
-        if 'job_title' in data:
-            field = data['job_title']
-            return f'<i class="fa fa-handshake-o" aria-hidden="true"></i> {name} is now <a href="#">#{field["to"]}</a> (previously <a href="#">#{field["from"]})</a>'
-        if 'manager_id' in data:
-            field = data['manager_id']
-            manager = delta['df']['to'].loc[field['to']]
-            manager_name = format_actor(manager)
-            return f'<i class="fa fa-random" aria-hidden="true"></i> {name} now reports to {manager_name}'
+    if tweet['type'] == 'change':
+        deltas = tweet['deltas']
+        if 'city' in deltas:
+            field = deltas['city']
+            hashtags += [field["from"], field["to"]]
+            return f'<i class="fa fa-plane" aria-hidden="true"></i> {name} moved from <a href="#">#{field["from"]}</a> to <a href="#">#{field["to"]}</a>'
+        if 'job_title' in deltas:
+            field = deltas['job_title']
+            hashtags += [field["from"], field["to"]]
+            return f'<i class="fa fa-handshake-o" aria-hidden="true"></i> {name} is now <a href="#">#{field["from"]}</a> (previously <a href="#">#{field["to"]}</a>)'
+        if 'manager_id' in deltas:
+            manager = tweet['user']['manager']
+            user_mentions += [manager['id']]
+            return f'<i class="fa fa-random" aria-hidden="true"></i> {name} now reports to {format_user(manager)}'
     return 'Unknown'
 
 
@@ -103,8 +107,7 @@ def load_tables():
 
 def main():
     tables = load_fixture_tables()
-    deltas = get_deltas_from_tables(tables)
-    tweets = list(map(delta_to_tweet, deltas))
+    tweets = list(get_deltas_from_tables(tables))
 
     cwd = pathlib.Path(__file__).parent
     with (cwd.parent / 'client' / 'src' / 'app' / 'app.fixture.ts').open('w') as fp:
